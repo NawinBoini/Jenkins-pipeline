@@ -1,0 +1,96 @@
+Clone the Git repository
+Build the project using Maven
+Scan the project with Trivy for vulnerabilities
+Run SonarQube analysis
+Push the built artifact to the Nexus repository
+Run unit tests
+Deploy the application to Kubernetes
+
+
+
+-------------------------------------------------------------------
+
+pipeline {
+    agent any
+
+    environment {
+        SONARQUBE_SERVER = 'SonarQube'  // Jenkins SonarQube server name
+        NEXUS_URL = 'http://your-nexus-server:8081'
+        NEXUS_REPO = 'maven-releases'
+        IMAGE_NAME = 'your-docker-image'
+        IMAGE_TAG = 'latest'
+        K8S_NAMESPACE = 'your-namespace'
+    }
+
+    stages {
+        stage('Clone Repository') {
+            steps {
+                git branch: 'main', url: 'https://github.com/your-repo.git'
+            }
+        }
+
+        stage('Build with Maven') {
+            steps {
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+
+        stage('Trivy Security Scan') {
+            steps {
+                sh 'trivy fs --exit-code 1 --severity HIGH,CRITICAL .'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv(SONARQUBE_SERVER) {
+                    sh 'mvn sonar:sonar'
+                }
+            }
+        }
+
+        stage('Publish to Nexus') {
+            steps {
+                sh "mvn deploy -DaltDeploymentRepository=nexus::default::${NEXUS_URL}/repository/${NEXUS_REPO}"
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+            }
+        }
+
+        stage('Push Docker Image to Registry') {
+            steps {
+                withDockerRegistry([credentialsId: 'docker-registry-credentials', url: 'https://your-docker-registry']) {
+                    sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                kubectl set image deployment/your-deployment your-container=${IMAGE_NAME}:${IMAGE_TAG} -n ${K8S_NAMESPACE}
+                kubectl rollout status deployment/your-deployment -n ${K8S_NAMESPACE}
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed!'
+        }
+    }
+}
